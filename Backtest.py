@@ -15,6 +15,8 @@ class Account:
         self.c_price = 0
         self.net_point = 0
         self.stop_loss = False
+        self.long_just_out = False
+        self.short_just_out = False
 
     def buy_long(self):
         self.cash -= self.lot_per_in * 46000
@@ -72,7 +74,6 @@ class Account:
         st.write('模擬開始')
         # st.write(f'max_price: {max_k}, min_price: {min_k}')
         for idx, row in data.iterrows():
-            # 1. 進場操作
             last_SMA5 = data.SMA5.iloc[idx-1]
             if row.timestamp.date() != cur_date:
                 max_k = max(data.open.iloc[idx:idx+3].max(),
@@ -82,8 +83,15 @@ class Account:
                 cur_date = row.timestamp.date()
             min_max_record = min_max_record.append(
                 {'timestamp': row.timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
+            if self.long_just_out and row.close < max_k:
+                self.long_just_out = False
+
+            if self.short_just_out and row.close > min_k:
+                self.short_just_out = False
+
+            # 1. 進場操作
             # (a) 做多：股價大於max
-            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] == 0:
+            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] == 0 and not self.long_just_out:
                 print(row.timestamp, row.close, 'buy long')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
@@ -91,7 +99,7 @@ class Account:
                 self.buy_long()
 
             # (b) 做空：股價小於min
-            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] == 0:
+            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] == 0 and not self.short_just_out:
                 print(row.timestamp, row.close, 'sell_short')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
@@ -110,6 +118,7 @@ class Account:
                 self.buy_short()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空出場', 'price': row.close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
+                self.short_just_out = True
 
             # (b) 做多：黑K且股價低於下斜SMA5
             if row.status == 'drop' and row.close < row.SMA5 and row.SMA5 < last_SMA5 and self.equity['lot'] != 0:
@@ -121,6 +130,7 @@ class Account:
                 self.sell_long()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多出場', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
+                self.long_just_out = True
 
             # 3. 停損點
 
@@ -134,6 +144,7 @@ class Account:
                 self.buy_short()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
+                self.short_just_out = True
 
             # (b) 做多：收盤價 < max
             if row.close < max_k and self.equity['lot'] != 0:
@@ -145,6 +156,7 @@ class Account:
                 self.sell_long()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
+                self.long_just_out = True
 
             result = result.append({'timestamp': row.timestamp, 'cash': self.cash, 'equity': self.equity['lot'], 'lot_debt': self.lot_debt['lot'], 'net asset': self.cash + 46000 * (
                 self.equity['lot'] - self.lot_debt['lot']), 'net_point': self.net_point, 'realized_income': self.net_point * 50}, ignore_index=True)
@@ -168,7 +180,7 @@ if uploaded_file is not None:
                       row.close else 'drop' for idx, row in data.iterrows()]
     data.reset_index(inplace=True)
     data.drop('index', axis=1, inplace=True)
-    st.subheader("股價資訊")
+    st.header("股價資訊")
     st.write(data)
     start_sim_date = dt.datetime.combine(st.date_input(
         '模擬開始日期', data.timestamp.iloc[0].date()), dt.datetime.min.time())
@@ -185,43 +197,78 @@ if uploaded_file is not None:
             cash), lot_per_in=lot_in, lot_per_out=lot_out)
         result, record, min_max_record = Backtest.run_sml()
         # record = record.set_index('timestamp')
-        start_date = dt.datetime.combine(st.date_input(
-            '起始日期', data.timestamp.iloc[0].date()), dt.datetime.min.time())
-        end_date = dt.datetime.combine(st.date_input(
-            '結束日期', data.timestamp.iloc[-1].date()), dt.datetime.max.time())
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True)
-        fig.add_trace(go.Candlestick(x=data[(start_date <
-                                             data.timestamp) & (data.timestamp < end_date)].timestamp,
-                                     open=data[(start_date <
-                                                data.timestamp) & (data.timestamp < end_date)]['open'],
-                                     high=data[(start_date <
-                                                data.timestamp) & (data.timestamp < end_date)]['high'],
-                                     low=data[(start_date <
-                                               data.timestamp) & (data.timestamp < end_date)]['low'],
-                                     close=data[(start_date <
-                                                 data.timestamp) & (data.timestamp < end_date)]['close'],
-                                     name='Price'
-                                     ), row=1, col=1)
-        fig.add_trace(go.Scatter(x=data[(start_date <
-                                         data.timestamp) & (data.timestamp < end_date)].timestamp,
-                                 y=data[(start_date <
-                                         data.timestamp) & (data.timestamp < end_date)]['SMA5'],
-                                 opacity=0.3,
-                                 line=dict(color='blue', width=1),
-                                 name='SMA 5'))
-        fig.add_trace(go.Scatter(x=min_max_record[(start_date <
-                                                   min_max_record.timestamp) & (min_max_record.timestamp < end_date)].timestamp, y=min_max_record[(start_date <
-                                                                                                                                                   min_max_record.timestamp) & (min_max_record.timestamp < end_date)]['min'], line=dict(color='purple', width=1), opacity=0.5, name='min'))
-        fig.add_trace(go.Scatter(x=min_max_record[(start_date <
-                                                   min_max_record.timestamp) & (min_max_record.timestamp < end_date)].timestamp, y=min_max_record[(start_date <
-                                                                                                                                                   min_max_record.timestamp) & (min_max_record.timestamp < end_date)]['max'], line=dict(color='purple', width=1), opacity=0.5, name='max'))
-        fig.add_trace(go.Scatter(x=record[(start_date < record.timestamp) & (record.timestamp < end_date)].timestamp, y=record[(
+        daily_result = pd.DataFrame()
+        for idx, row in result.iterrows():
+            if idx == result.shape[0] - 1:
+                daily_result = daily_result.append(
+                    {'date': row.timestamp.date(), 'income': row.realized_income}, ignore_index=True)
+            elif row.timestamp.date() != result.iloc[idx+1].timestamp.date():
+                daily_result = daily_result.append(
+                    {'date': row.timestamp.date(), 'income': row.realized_income}, ignore_index=True)
+        # day_range = (end_sim_date - start_sim_date).days
+        # last_date_income = daily_result.iloc[0].income
+        # for i in range(day_range):
+        #     date = start_sim_date.date() + dt.timedelta(days=i)
+        #     if date not in list(daily_result.date):
+        #         daily_result = daily_result.append(
+        #             {'date': date, 'income': last_date_income}, ignore_index=True)
+        #     else:
+        #         last_date_income = daily_result[daily_result.date ==
+        #                                         date].income.iloc[0]
+        daily_result.sort_values(by=['date'], inplace=True)
+        bar = go.Scatter(x=daily_result['date'],
+                         y=daily_result['income'], fill='tozeroy')
+        fig = go.Figure(data=bar)
+        st.header('回測模擬圖')
+        st.subheader('每日收益變化')
+        st.plotly_chart(fig)
+        st.subheader('每日操作檢視')
+        plot_mode = st.radio("選擇圖表模式", ['單日', '多日'])
+        if plot_mode == '單日':
+            selected_date = st.date_input(
+                '起始日期', data.timestamp.iloc[0].date())
+            start_date = dt.datetime.combine(
+                selected_date, dt.datetime.min.time())
+            end_date = dt.datetime.combine(
+                selected_date, dt.datetime.max.time())
+        else:
+            start_date = dt.datetime.combine(st.date_input(
+                '起始日期', data.timestamp.iloc[0].date()), dt.datetime.min.time())
+            end_date = dt.datetime.combine(st.date_input(
+                '結束日期', data.timestamp.iloc[-1].date()), dt.datetime.max.time())
+
+        fig2 = make_subplots(rows=3, cols=1, shared_xaxes=True)
+        fig2.add_trace(go.Candlestick(x=data[(start_date <
+                                              data.timestamp) & (data.timestamp < end_date)].timestamp,
+                                      open=data[(start_date <
+                                                 data.timestamp) & (data.timestamp < end_date)]['open'],
+                                      high=data[(start_date <
+                                                 data.timestamp) & (data.timestamp < end_date)]['high'],
+                                      low=data[(start_date <
+                                                data.timestamp) & (data.timestamp < end_date)]['low'],
+                                      close=data[(start_date <
+                                                  data.timestamp) & (data.timestamp < end_date)]['close'],
+                                      name='Price'
+                                      ), row=1, col=1)
+        fig2.add_trace(go.Scatter(x=data[(start_date <
+                                          data.timestamp) & (data.timestamp < end_date)].timestamp,
+                                  y=data[(start_date <
+                                          data.timestamp) & (data.timestamp < end_date)]['SMA5'],
+                                  opacity=0.3,
+                                  line=dict(color='blue', width=1),
+                                  name='SMA 5'))
+        fig2.add_trace(go.Scatter(x=min_max_record[(start_date <
+                                                    min_max_record.timestamp) & (min_max_record.timestamp < end_date)].timestamp, y=min_max_record[(start_date <
+                                                                                                                                                    min_max_record.timestamp) & (min_max_record.timestamp < end_date)]['min'], line=dict(color='purple', width=1), opacity=0.5, name='min'))
+        fig2.add_trace(go.Scatter(x=min_max_record[(start_date <
+                                                    min_max_record.timestamp) & (min_max_record.timestamp < end_date)].timestamp, y=min_max_record[(start_date <
+                                                                                                                                                    min_max_record.timestamp) & (min_max_record.timestamp < end_date)]['max'], line=dict(color='purple', width=1), opacity=0.5, name='max'))
+        fig2.add_trace(go.Scatter(x=record[(start_date < record.timestamp) & (record.timestamp < end_date)].timestamp, y=record[(
             start_date < record.timestamp) & (record.timestamp < end_date)].price, name='Action', mode='markers', marker={'color': 'yellow'}), row=1, col=1)
 
-        fig.add_trace(go.Bar(x=result[(start_date < result.timestamp) & (result.timestamp < end_date)].timestamp, y=result[(
-            start_date < result.timestamp) & (result.timestamp < end_date)]['realized_income'], name='Income', marker={'color': 'red'}), row=3, col=1)
-        st.subheader('回測模擬')
-        st.plotly_chart(fig, use_container_width=True)
+        fig2.add_trace(go.Scatter(x=result[(start_date < result.timestamp) & (result.timestamp < end_date)].timestamp, y=result[(
+            start_date < result.timestamp) & (result.timestamp < end_date)]['realized_income'], name='Income', marker={'color': 'purple'}, fill='tozeroy'), row=3, col=1)
+        st.plotly_chart(fig2, use_container_width=True)
         st.subheader('操作記錄')
         st.write(
             record)
