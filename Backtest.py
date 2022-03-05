@@ -271,4 +271,5 @@ if uploaded_file is not None:
         st.plotly_chart(fig2, use_container_width=True)
         st.subheader('操作記錄')
         st.write(
-            record)
+            record[(
+                start_date < record.timestamp) & (record.timestamp < end_date)])
