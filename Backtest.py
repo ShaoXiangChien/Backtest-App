@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 
 
 class Account:
-    def __init__(self, starting_cash, lot_per_in, lot_per_out):
+    def __init__(self, starting_cash, lot_per_in, lot_per_out, fair_out):
         self.cash = starting_cash
         self.equity = {'lot': 0, 'price': 0}
         self.lot_debt = {'lot': 0, 'price': 0}
@@ -16,6 +16,7 @@ class Account:
         self.net_point = 0
         self.long_just_out = False
         self.short_just_out = False
+        self.fair_out = fair_out
 
     def buy_long(self):
         self.cash -= self.lot_per_in * 46000
@@ -70,20 +71,28 @@ class Account:
         result = pd.DataFrame()
         record = pd.DataFrame()
         min_max_record = pd.DataFrame()
+        min_max_record = min_max_record.append(
+            {'timestamp': data.iloc[0].timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
         cur_date = data.timestamp.iloc[0].date()
         st.write('模擬開始')
         # st.write(f'max_price: {max_k}, min_price: {min_k}')
         for idx, row in data.iterrows():
+            if not(dt.time(8, 0) <= row.timestamp.time() <= dt.time(14, 0)):
+                continue
+
             last_SMA5 = data.SMA5.iloc[idx-1]
             if row.timestamp.date() != cur_date:
-                self.c_price = data.iloc[idx-1].close
-                print(data.iloc[idx-1].timestamp, self.c_price)
-                point_diff = (self.lot_debt['price'] -
-                              self.c_price) * self.lot_debt['lot'] + (self.c_price - self.equity['price']) * self.equity['lot']
-                self.short_stop_loss()
-                self.long_stop_loss()
-                record = record.append(
-                    {'timestamp': data.iloc[idx-1].timestamp, 'action': '平倉', 'price': data.iloc[idx-1].close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
+                if self.fair_out:
+                    # 平倉
+                    self.c_price = data.iloc[idx-1].close
+                    print(data.iloc[idx-1].timestamp, self.c_price)
+                    point_diff = (self.lot_debt['price'] -
+                                  self.c_price) * self.lot_debt['lot'] + (self.c_price - self.equity['price']) * self.equity['lot']
+                    self.short_stop_loss()
+                    self.long_stop_loss()
+                    record = record.append(
+                        {'timestamp': data.iloc[idx-1].timestamp, 'action': '平倉', 'price': data.iloc[idx-1].close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
+
                 max_k = max(data.open.iloc[idx:idx+3].max(),
                             data.close.iloc[idx:idx+3].max())
                 min_k = min(data.open.iloc[idx:idx+3].min(),
@@ -106,6 +115,7 @@ class Account:
                     {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
                 self.c_price = row.close
                 self.buy_long()
+                continue
 
             # (b) 做空：股價小於min
             if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] == 0 and not self.short_just_out:
@@ -114,6 +124,7 @@ class Account:
                     {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
                 self.c_price = row.close
                 self.sell_short()
+                continue
 
             # 2. 出場操作
 
@@ -128,6 +139,7 @@ class Account:
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空出場', 'price': row.close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
                 self.short_just_out = True
+                continue
 
             # (b) 做多：黑K且股價低於下斜SMA5
             if row.status == 'drop' and row.close < row.SMA5 and row.SMA5 < last_SMA5 and self.equity['lot'] != 0 and self.equity['price'] < row.close:
@@ -140,6 +152,7 @@ class Account:
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多出場', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.long_just_out = True
+                continue
 
             # 3. 停損點
 
@@ -153,6 +166,7 @@ class Account:
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.short_just_out = True
+                continue
 
             # (b) 做多：收盤價 < max
             if (row.close < max_k or (row.close < row.SMA5 and row.SMA5 < last_SMA5)) and self.equity['lot'] != 0:
@@ -164,6 +178,7 @@ class Account:
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.long_just_out = True
+                continue
 
             result = result.append({'timestamp': row.timestamp, 'cash': self.cash, 'equity': self.equity['lot'], 'lot_debt': self.lot_debt['lot'], 'net asset': self.cash + 46000 * (
                 self.equity['lot'] - self.lot_debt['lot']), 'net_point': self.net_point, 'realized_income': self.net_point * 50}, ignore_index=True)
@@ -209,12 +224,13 @@ if uploaded_file is not None:
     data = data[(start_sim_date <
                  data.timestamp) & (data.timestamp < end_sim_date)].reset_index()
     cash = st.text_input('輸入起始本金')
+    if_fair_out = st.checkbox('是否執行當日平倉')
     lot_in = st.slider('每次進場之口數', 0, 20)
     lot_out = st.slider('每次出場之口數', 0, 20)
 
     if cash != "" and lot_in != 0 and lot_out != 0:
         Backtest = Account(starting_cash=int(
-            cash), lot_per_in=lot_in, lot_per_out=lot_out)
+            cash), lot_per_in=lot_in, lot_per_out=lot_out, fair_out=if_fair_out)
         result, record, min_max_record = Backtest.run_sml()
         # record = record.set_index('timestamp')
         daily_result = pd.DataFrame()
