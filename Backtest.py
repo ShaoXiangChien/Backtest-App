@@ -173,19 +173,22 @@ class Account:
 st.subheader("上傳股價資訊")
 uploaded_file = st.file_uploader("")
 if uploaded_file is not None:
-    data = pd.read_excel(uploaded_file)
+    try:
+        data = pd.read_excel(uploaded_file)
 
-    # data preprocessing
-    data = data[['日期', '時間', '開盤價', '最高價', '最低價', '收盤價', 'SMA5']]
-    data.columns = ['date', 'time', 'open', 'high', 'low', 'close', 'SMA5']
-    data = data.dropna()
-    data['timestamp'] = [dt.datetime.strptime(str(row.date)[
-        : 11] + str(row.time), '%Y-%m-%d %H:%M:%S') for idx, row in data.iterrows()]
-    data = data[['timestamp', 'open', 'high', 'low', 'close', 'SMA5']]
-    data['status'] = ['rise' if row.open <
-                      row.close else 'drop' for idx, row in data.iterrows()]
-    data.reset_index(inplace=True)
-    data.drop('index', axis=1, inplace=True)
+        # data preprocessing
+        data = data[['日期', '時間', '開盤價', '最高價', '最低價', '收盤價', 'SMA5']]
+        data.columns = ['date', 'time', 'open', 'high', 'low', 'close', 'SMA5']
+        data = data.dropna()
+        data['timestamp'] = [dt.datetime.strptime(str(row.date)[
+            : 11] + str(row.time), '%Y-%m-%d %H:%M:%S') for idx, row in data.iterrows()]
+        data = data[['timestamp', 'open', 'high', 'low', 'close', 'SMA5']]
+        data['status'] = ['rise' if row.open <
+                          row.close else 'drop' for idx, row in data.iterrows()]
+        data.reset_index(inplace=True)
+        data.drop('index', axis=1, inplace=True)
+    except:
+        data = pd.read_feather(uploaded_file)
     st.header("股價資訊")
     st.write(data)
     start_sim_date = dt.datetime.combine(st.date_input(
