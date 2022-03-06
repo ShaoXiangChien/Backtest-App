@@ -63,6 +63,7 @@ class Account:
         self.lot_debt['lot'] = 0
         self.lot_debt['price'] = 0
 
+    @st.cache(suppress_st_warning=True)
     def run_sml(self):
         max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max())
         min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min())
@@ -189,8 +190,16 @@ if uploaded_file is not None:
         data.drop('index', axis=1, inplace=True)
     except:
         data = pd.read_feather(uploaded_file)
-        data['status'] = ['rise' if row.open <
-                          row.close else 'drop' for idx, row in data.iterrows()]
+        # data['status'] = ['rise' if row.open <
+        #                   row.close else 'drop' for idx, row in data.iterrows()]
+    sim_year_start = dt.datetime(st.selectbox(
+        '開始年份', [year for year in range(data.iloc[0].timestamp.year, data.iloc[-1].timestamp.year+1)]), 1, 1)
+    end_year_ls = [year for year in range(
+        data.iloc[0].timestamp.year, data.iloc[-1].timestamp.year+1)]
+    sim_year_end = dt.datetime(st.selectbox(
+        '結束年份', end_year_ls, len(end_year_ls) - 1), 12, 31, 23, 59, 59)
+    data = data[(sim_year_start < data.timestamp) & (
+        data.timestamp < sim_year_end)].reset_index()
     st.header("股價資訊")
     st.write(data)
     start_sim_date = dt.datetime.combine(st.date_input(
@@ -248,23 +257,18 @@ if uploaded_file is not None:
             end_date = dt.datetime.combine(st.date_input(
                 '結束日期', data.timestamp.iloc[-1].date()), dt.datetime.max.time())
 
+        chart_data = data[(start_date < data.timestamp)
+                          & (data.timestamp < end_date)]
         fig2 = make_subplots(rows=3, cols=1, shared_xaxes=True)
-        fig2.add_trace(go.Candlestick(x=data[(start_date <
-                                              data.timestamp) & (data.timestamp < end_date)].timestamp,
-                                      open=data[(start_date <
-                                                 data.timestamp) & (data.timestamp < end_date)]['open'],
-                                      high=data[(start_date <
-                                                 data.timestamp) & (data.timestamp < end_date)]['high'],
-                                      low=data[(start_date <
-                                                data.timestamp) & (data.timestamp < end_date)]['low'],
-                                      close=data[(start_date <
-                                                  data.timestamp) & (data.timestamp < end_date)]['close'],
+        fig2.add_trace(go.Candlestick(x=chart_data.timestamp,
+                                      open=chart_data['open'],
+                                      high=chart_data['high'],
+                                      low=chart_data['low'],
+                                      close=chart_data['close'],
                                       name='Price'
                                       ), row=1, col=1)
-        fig2.add_trace(go.Scatter(x=data[(start_date <
-                                          data.timestamp) & (data.timestamp < end_date)].timestamp,
-                                  y=data[(start_date <
-                                          data.timestamp) & (data.timestamp < end_date)]['SMA5'],
+        fig2.add_trace(go.Scatter(x=chart_data.timestamp,
+                                  y=chart_data['SMA5'],
                                   opacity=0.3,
                                   line=dict(color='blue', width=1),
                                   name='SMA 5'))
