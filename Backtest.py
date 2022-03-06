@@ -14,7 +14,6 @@ class Account:
         self.lot_per_out = lot_per_out
         self.c_price = 0
         self.net_point = 0
-        self.stop_loss = False
         self.long_just_out = False
         self.short_just_out = False
 
@@ -29,40 +28,40 @@ class Account:
         self.lot_debt['price'] = self.c_price
 
     def sell_long(self):
-        if self.stop_loss:
-            self.net_point += (self.c_price -
-                               self.equity['price']) * self.equity['lot']
-            self.cash += self.equity['lot'] * \
-                (46000 + (self.c_price - self.equity['price']) * 50)
-            self.equity['lot'] = 0
-            self.stop_loss = False
-        else:
-            self.net_point += (self.c_price -
-                               self.equity['price']) * self.lot_per_out
-            self.cash += self.lot_per_out * \
-                (46000 + (self.c_price - self.equity['price']) * 50)
-            self.equity['lot'] = self.equity['lot'] - \
-                self.lot_per_out if self.equity['lot'] > self.lot_per_out else 0
+        self.net_point += (self.c_price -
+                           self.equity['price']) * self.lot_per_out
+        self.cash += self.lot_per_out * \
+            (46000 + (self.c_price - self.equity['price']) * 50)
+        self.equity['lot'] = self.equity['lot'] - \
+            self.lot_per_out if self.equity['lot'] > self.lot_per_out else 0
         if self.equity['lot'] == 0:
             self.equity['price'] = 0
 
     def buy_short(self):
-        if self.stop_loss:
-            self.net_point += (self.lot_debt['price'] -
-                               self.c_price) * self.lot_debt['lot']
-            self.cash += self.lot_debt['lot'] * \
-                ((self.lot_debt['price'] - self.c_price) * 50 - 46000)
-            self.lot_debt['lot'] = 0
-            self.stop_loss = True
-        else:
-            self.net_point += (self.lot_debt['price'] -
-                               self.c_price) * self.lot_per_out
-            self.cash += self.lot_per_out * \
-                ((self.lot_debt['price'] - self.c_price) * 50 - 46000)
-            self.lot_debt['lot'] = self.lot_debt['lot'] - \
-                self.lot_per_out if self.lot_debt['lot'] > self.lot_per_out else 0
+        self.net_point += (self.lot_debt['price'] -
+                           self.c_price) * self.lot_per_out
+        self.cash += self.lot_per_out * \
+            ((self.lot_debt['price'] - self.c_price) * 50 - 46000)
+        self.lot_debt['lot'] = self.lot_debt['lot'] - \
+            self.lot_per_out if self.lot_debt['lot'] > self.lot_per_out else 0
         if self.lot_debt['lot'] == 0:
             self.lot_debt['price'] = 0
+
+    def long_stop_loss(self):
+        self.net_point += (self.c_price -
+                           self.equity['price']) * self.equity['lot']
+        self.cash += self.equity['lot'] * \
+            (46000 + (self.c_price - self.equity['price']) * 50)
+        self.equity['lot'] = 0
+        self.equity['price'] = 0
+
+    def short_stop_loss(self):
+        self.net_point += (self.lot_debt['price'] -
+                           self.c_price) * self.lot_debt['lot']
+        self.cash += self.lot_debt['lot'] * \
+            ((self.lot_debt['price'] - self.c_price) * 50 - 46000)
+        self.lot_debt['lot'] = 0
+        self.lot_debt['price'] = 0
 
     def run_sml(self):
         max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max())
@@ -76,17 +75,26 @@ class Account:
         for idx, row in data.iterrows():
             last_SMA5 = data.SMA5.iloc[idx-1]
             if row.timestamp.date() != cur_date:
+                self.c_price = data.iloc[idx-1].close
+                print(data.iloc[idx-1].timestamp, self.c_price)
+                point_diff = (self.lot_debt['price'] -
+                              self.c_price) * self.lot_debt['lot'] + (self.c_price - self.equity['price']) * self.equity['lot']
+                self.short_stop_loss()
+                self.long_stop_loss()
+                record = record.append(
+                    {'timestamp': data.iloc[idx-1].timestamp, 'action': '平倉', 'price': data.iloc[idx-1].close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
                 max_k = max(data.open.iloc[idx:idx+3].max(),
                             data.close.iloc[idx:idx+3].max())
                 min_k = min(data.open.iloc[idx:idx+3].min(),
                             data.close.iloc[idx:idx+3].min())
                 cur_date = row.timestamp.date()
+
             min_max_record = min_max_record.append(
                 {'timestamp': row.timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
-            if self.long_just_out and row.close < max_k:
+            if self.long_just_out and row.low < max_k:
                 self.long_just_out = False
 
-            if self.short_just_out and row.close > min_k:
+            if self.short_just_out and row.high > min_k:
                 self.short_just_out = False
 
             # 1. 進場操作
@@ -109,7 +117,7 @@ class Account:
             # 2. 出場操作
 
             # (a) 做空：紅K且股價高於上斜SMA5
-            if row.status == 'rise' and row.close > row.SMA5 and row.SMA5 > last_SMA5 and self.lot_debt['lot'] != 0:
+            if row.status == 'rise' and row.close > row.SMA5 and row.SMA5 > last_SMA5 and self.lot_debt['lot'] != 0 and self.lot_debt['price'] > row.close:
                 print(
                     f'{row.timestamp} buy short: sell at {self.lot_debt["price"]}, buy at {row.close}')
                 self.c_price = row.close
@@ -121,7 +129,7 @@ class Account:
                 self.short_just_out = True
 
             # (b) 做多：黑K且股價低於下斜SMA5
-            if row.status == 'drop' and row.close < row.SMA5 and row.SMA5 < last_SMA5 and self.equity['lot'] != 0:
+            if row.status == 'drop' and row.close < row.SMA5 and row.SMA5 < last_SMA5 and self.equity['lot'] != 0 and self.equity['price'] < row.close:
                 print(
                     f'{row.timestamp} sell long: buy at {self.equity["price"]}, sell at {row.close}')
                 self.c_price = row.close
@@ -140,8 +148,7 @@ class Account:
                 self.c_price = row.close
                 point_diff = (self.lot_debt["price"] -
                               self.c_price) * self.lot_debt["lot"]
-                self.stop_loss = True
-                self.buy_short()
+                self.short_stop_loss()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.short_just_out = True
@@ -152,8 +159,7 @@ class Account:
                 self.c_price = row.close
                 point_diff = (self.c_price -
                               self.equity["price"]) * self.equity["lot"]
-                self.stop_loss = True
-                self.sell_long()
+                self.long_stop_loss()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.long_just_out = True
