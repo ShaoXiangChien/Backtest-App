@@ -144,7 +144,7 @@ class Account:
             # 3. 停損點
 
             # (a) 做空：收盤價 > min
-            if row.close > min_k and self.lot_debt['lot'] != 0:
+            if (row.close > min_k or (row.close > row.SMA5 and row.SMA5 > last_SMA5)) and self.lot_debt['lot'] != 0:
                 print(row.timestamp, row.close, 'buy_short')
                 self.c_price = row.close
                 point_diff = (self.lot_debt["price"] -
@@ -155,7 +155,7 @@ class Account:
                 self.short_just_out = True
 
             # (b) 做多：收盤價 < max
-            if row.close < max_k and self.equity['lot'] != 0:
+            if (row.close < max_k or (row.close < row.SMA5 and row.SMA5 < last_SMA5)) and self.equity['lot'] != 0:
                 print(row.timestamp, row.close, 'sell_long')
                 self.c_price = row.close
                 point_diff = (self.c_price -
