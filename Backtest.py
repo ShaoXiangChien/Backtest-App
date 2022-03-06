@@ -189,6 +189,8 @@ if uploaded_file is not None:
         data.drop('index', axis=1, inplace=True)
     except:
         data = pd.read_feather(uploaded_file)
+        data['status'] = ['rise' if row.open <
+                          row.close else 'drop' for idx, row in data.iterrows()]
     st.header("股價資訊")
     st.write(data)
     start_sim_date = dt.datetime.combine(st.date_input(
