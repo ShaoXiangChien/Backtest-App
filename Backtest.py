@@ -196,7 +196,7 @@ if uploaded_file is not None:
     end_sim_date = dt.datetime.combine(st.date_input(
         '模擬結束日期', data.timestamp.iloc[-1].date()), dt.datetime.max.time())
     data = data[(start_sim_date <
-                 data.timestamp) & (data.timestamp < end_sim_date)]
+                 data.timestamp) & (data.timestamp < end_sim_date)].reset_index()
     cash = st.text_input('輸入起始本金')
     lot_in = st.slider('每次進場之口數', 0, 20)
     lot_out = st.slider('每次出場之口數', 0, 20)
