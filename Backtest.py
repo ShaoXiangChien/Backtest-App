@@ -3,10 +3,11 @@ import streamlit as st
 import datetime as dt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import random
 
 
 class Account:
-    def __init__(self, starting_cash, lot_per_in, lot_per_out, fair_out):
+    def __init__(self, starting_cash, lot_per_in, lot_per_out, fair_out, mode, early_stop):
         self.cash = starting_cash
         self.equity = {'lot': 0, 'price': 0}
         self.lot_debt = {'lot': 0, 'price': 0}
@@ -17,6 +18,8 @@ class Account:
         self.long_just_out = False
         self.short_just_out = False
         self.fair_out = fair_out
+        self.mode = mode
+        self.early_stop = early_stop
 
     def buy_long(self):
         self.cash -= self.lot_per_in * 46000
@@ -66,8 +69,10 @@ class Account:
 
     @st.cache(suppress_st_warning=True)
     def run_sml(self):
-        max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max())
-        min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min())
+        max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max(
+        )) if mode == '保守' else max(data.open.iloc[0], data.close.iloc[0])
+        min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min(
+        )) if mode == '保守' else min(data.open.iloc[0], data.close.iloc[0])
         result = pd.DataFrame()
         record = pd.DataFrame()
         min_max_record = pd.DataFrame()
@@ -80,7 +85,7 @@ class Account:
             if not(dt.time(8, 0) <= row.timestamp.time() <= dt.time(14, 0)):
                 continue
 
-            {'cond1': row.close < max_k}
+            # {'cond1': row.close < max_k}
 
             last_SMA5 = data.SMA5.iloc[idx-1]
             if row.timestamp.date() != cur_date:
@@ -96,9 +101,9 @@ class Account:
                         {'timestamp': data.iloc[idx-1].timestamp, 'action': '平倉', 'price': data.iloc[idx-1].close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
 
                 max_k = max(data.open.iloc[idx:idx+3].max(),
-                            data.close.iloc[idx:idx+3].max())
+                            data.close.iloc[idx:idx+3].max()) if mode == '保守' else max(data.open.iloc[idx], data.close.iloc[idx])
                 min_k = min(data.open.iloc[idx:idx+3].min(),
-                            data.close.iloc[idx:idx+3].min())
+                            data.close.iloc[idx:idx+3].min()) if mode == '保守' else min(data.open.iloc[idx], data.close.iloc[idx])
                 cur_date = row.timestamp.date()
 
             min_max_record = min_max_record.append(
@@ -111,11 +116,12 @@ class Account:
 
             # 1. 做多
             # (a) 進場：股價大於max
-            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out:
+            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
                 print(row.timestamp, row.close, 'buy long')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
-                self.c_price = row.close
+                self.c_price = row.close if mode == '保守' else max_k + \
+                    random.randint(1, 5)
                 self.buy_long()
                 continue
 
@@ -149,11 +155,12 @@ class Account:
             # 2. 做空
 
             # (a) 進場：股價小於min
-            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out:
+            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
                 print(row.timestamp, row.close, 'sell_short')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
-                self.c_price = row.close
+                self.c_price = row.close if mode == '保守' else min_k - \
+                    random.randint(1, 5)
                 self.sell_short()
                 continue
 
@@ -227,13 +234,16 @@ if uploaded_file is not None:
     data = data[(start_sim_date <
                  data.timestamp) & (data.timestamp < end_sim_date)].reset_index()
     cash = st.text_input('輸入起始本金')
+    mode = st.radio('跳空戰法模式', ['保守（前三根）', '積極（第一根）'])
+    if_early_stop = st.selectbox('跳空時間限制', ['無', '十點半前', '十一點前'])
     if_fair_out = st.checkbox('是否執行當日平倉')
+    # if_stop_early = st.
     lot_in = st.slider('每次進場之口數', 0, 20)
     lot_out = st.slider('每次出場之口數', 0, 20)
 
     if cash != "" and lot_in != 0 and lot_out != 0:
         Backtest = Account(starting_cash=int(
-            cash), lot_per_in=lot_in, lot_per_out=lot_out, fair_out=if_fair_out)
+            cash), lot_per_in=lot_in, lot_per_out=lot_out, fair_out=if_fair_out, mode=mode, early_stop=if_early_stop)
         result, record, min_max_record = Backtest.run_sml()
         # record = record.set_index('timestamp')
         daily_result = pd.DataFrame()
