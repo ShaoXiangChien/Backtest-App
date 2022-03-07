@@ -156,7 +156,7 @@ class Account:
             # 2. 做空
 
             # (a) 進場：股價小於min
-            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
+            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() <= dt.time(11, 0) and self.early_stop == '十一點前')):
                 # print(row.timestamp, row.close, 'sell_short')
                 self.c_price = row.close if not self.go_crazy else min_k - \
                     random.randint(1, 5)
