@@ -7,7 +7,7 @@ import random
 
 
 class Account:
-    def __init__(self, starting_cash, lot_per_in, lot_per_out, fair_out, mode, early_stop):
+    def __init__(self, starting_cash, lot_per_in, lot_per_out, fair_out, mode, early_stop, go_crazy):
         self.cash = starting_cash
         self.equity = {'lot': 0, 'price': 0}
         self.lot_debt = {'lot': 0, 'price': 0}
@@ -20,6 +20,7 @@ class Account:
         self.fair_out = fair_out
         self.mode = mode
         self.early_stop = early_stop
+        self.go_crazy = go_crazy
 
     def buy_long(self):
         self.cash -= self.lot_per_in * 46000
@@ -120,7 +121,7 @@ class Account:
                 # print(row.timestamp, row.close, 'buy long')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
-                self.c_price = row.close if mode == '保守' else max_k + \
+                self.c_price = row.close if not self.go_crazy else max_k + \
                     random.randint(1, 5)
                 self.buy_long()
                 continue
@@ -159,7 +160,7 @@ class Account:
                 # print(row.timestamp, row.close, 'sell_short')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
-                self.c_price = row.close if mode == '保守' else min_k - \
+                self.c_price = row.close if not self.go_crazy else min_k - \
                     random.randint(1, 5)
                 self.sell_short()
                 continue
@@ -178,7 +179,7 @@ class Account:
                 self.short_just_out = True
                 continue
 
-            # (a) 停損：收盤價漲破Min或上斜SMA5
+            # (c) 停損：收盤價漲破Min或上斜SMA5
             if (row.close > min_k or (row.close > row.SMA5 and row.SMA5 > last_SMA5)) and self.lot_debt['lot'] != 0:
                 # print(row.timestamp, row.close, 'buy_short')
                 self.c_price = row.close
@@ -236,6 +237,7 @@ if uploaded_file is not None:
     cash = st.text_input('輸入起始本金')
     mode = st.radio('跳空戰法模式', ['保守（前三根）', '積極（第一根）'])
     if_early_stop = st.selectbox('跳空時間限制', ['無', '十點半前', '十一點前'])
+    if_go_crazy = st.checkbox('是否選擇瘋狂模式（進場模擬實際情況）')
     if_fair_out = st.checkbox('是否執行當日平倉')
     # if_stop_early = st.
     lot_in = st.slider('每次進場之口數', 0, 20)
@@ -243,7 +245,7 @@ if uploaded_file is not None:
 
     if cash != "" and lot_in != 0 and lot_out != 0:
         Backtest = Account(starting_cash=int(
-            cash), lot_per_in=lot_in, lot_per_out=lot_out, fair_out=if_fair_out, mode=mode, early_stop=if_early_stop)
+            cash), lot_per_in=lot_in, lot_per_out=lot_out, fair_out=if_fair_out, mode=mode, early_stop=if_early_stop, go_crazy=if_go_crazy)
         result, record, min_max_record = Backtest.run_sml()
         # record = record.set_index('timestamp')
         daily_result = pd.DataFrame()
