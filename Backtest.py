@@ -71,7 +71,7 @@ class Account:
     @st.cache(suppress_st_warning=True)
     def run_sml(self):
         max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max(
-        )) if mode == '保守' else max(data.open.iloc[0], data.close.iloc[0])
+        )) if mode == '保守' else max(data.iloc[0].open, data.iloc[0].close)
         min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min(
         )) if mode == '保守' else min(data.open.iloc[0], data.close.iloc[0])
         result = pd.DataFrame()
@@ -119,10 +119,10 @@ class Account:
             # (a) 進場：股價大於max
             if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
                 # print(row.timestamp, row.close, 'buy long')
-                record = record.append(
-                    {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
                 self.c_price = row.close if not self.go_crazy else max_k + \
                     random.randint(1, 5)
+                record = record.append(
+                    {'timestamp': row.timestamp, 'action': '做多', 'price': self.c_price, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
                 self.buy_long()
                 continue
 
@@ -158,10 +158,10 @@ class Account:
             # (a) 進場：股價小於min
             if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
                 # print(row.timestamp, row.close, 'sell_short')
-                record = record.append(
-                    {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
                 self.c_price = row.close if not self.go_crazy else min_k - \
                     random.randint(1, 5)
+                record = record.append(
+                    {'timestamp': row.timestamp, 'action': '做空', 'price': self.c_price, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
                 self.sell_short()
                 continue
 
@@ -225,7 +225,7 @@ if uploaded_file is not None:
     sim_year_end = dt.datetime(st.selectbox(
         '結束年份', end_year_ls, len(end_year_ls) - 1), 12, 31, 23, 59, 59)
     data = data[(sim_year_start < data.timestamp) & (
-        data.timestamp < sim_year_end)].reset_index()
+        data.timestamp < sim_year_end)].reset_index().drop('index', axis=1)
     st.header("股價資訊")
     st.write(data)
     start_sim_date = dt.datetime.combine(st.date_input(
@@ -267,6 +267,13 @@ if uploaded_file is not None:
         #         last_date_income = daily_result[daily_result.date ==
         #                                         date].income.iloc[0]
         daily_result.sort_values(by=['date'], inplace=True)
+        daily_result['lag1'] = daily_result['income'].shift(-1)
+        daily_result['lag1'].fillna(
+            daily_result['income'].iloc[daily_result.shape[0]-1], inplace=True)
+        daily_result['income_delta'] = daily_result['lag1'] - \
+            daily_result['income']
+        st.write(
+            f"平均每日收益：{round(daily_result['income_delta'].mean() / 50, 2)}點")
         bar = go.Scatter(x=daily_result['date'],
                          y=daily_result['income'], fill='tozeroy')
         fig = go.Figure(data=bar)
