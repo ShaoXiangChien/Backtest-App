@@ -29,22 +29,22 @@ class Account:
         self.lot_debt['price'] = self.c_price
 
     def sell_long(self):
+        lot_out = self.lot_per_out if self.equity['lot'] > self.lot_per_out else self.equity['lot']
         self.net_point += (self.c_price -
-                           self.equity['price']) * self.lot_per_out
-        self.cash += self.lot_per_out * \
+                           self.equity['price']) * lot_out
+        self.cash += lot_out * \
             (46000 + (self.c_price - self.equity['price']) * 50)
-        self.equity['lot'] = self.equity['lot'] - \
-            self.lot_per_out if self.equity['lot'] > self.lot_per_out else 0
+        self.equity['lot'] -= lot_out
         if self.equity['lot'] == 0:
             self.equity['price'] = 0
 
     def buy_short(self):
+        lot_out = self.lot_per_out if self.lot_debt['lot'] > self.lot_per_out else self.lot_debt['lot']
         self.net_point += (self.lot_debt['price'] -
-                           self.c_price) * self.lot_per_out
-        self.cash += self.lot_per_out * \
+                           self.c_price) * lot_out
+        self.cash += lot_out * \
             ((self.lot_debt['price'] - self.c_price) * 50 - 46000)
-        self.lot_debt['lot'] = self.lot_debt['lot'] - \
-            self.lot_per_out if self.lot_debt['lot'] > self.lot_per_out else 0
+        self.lot_debt['lot'] -= lot_out
         if self.lot_debt['lot'] == 0:
             self.lot_debt['price'] = 0
 
@@ -80,6 +80,8 @@ class Account:
             if not(dt.time(8, 0) <= row.timestamp.time() <= dt.time(14, 0)):
                 continue
 
+            {'cond1': row.close < max_k}
+
             last_SMA5 = data.SMA5.iloc[idx-1]
             if row.timestamp.date() != cur_date:
                 if self.fair_out:
@@ -107,9 +109,9 @@ class Account:
             if self.short_just_out and row.high > min_k:
                 self.short_just_out = False
 
-            # 1. 進場操作
-            # (a) 做多：股價大於max
-            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] == 0 and not self.long_just_out:
+            # 1. 做多
+            # (a) 進場：股價大於max
+            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out:
                 print(row.timestamp, row.close, 'buy long')
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多', 'price': row.close, 'detail': f'收盤 {row.close} > Max {max_k}'}, ignore_index=True)
@@ -117,58 +119,22 @@ class Account:
                 self.buy_long()
                 continue
 
-            # (b) 做空：股價小於min
-            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] == 0 and not self.short_just_out:
-                print(row.timestamp, row.close, 'sell_short')
-                record = record.append(
-                    {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
-                self.c_price = row.close
-                self.sell_short()
-                continue
-
-            # 2. 出場操作
-
-            # (a) 做空：紅K且股價高於上斜SMA5
-            if row.status == 'rise' and row.close > row.SMA5 and row.SMA5 > last_SMA5 and self.lot_debt['lot'] != 0 and self.lot_debt['price'] > row.close:
-                print(
-                    f'{row.timestamp} buy short: sell at {self.lot_debt["price"]}, buy at {row.close}')
-                self.c_price = row.close
-                point_diff = (self.lot_debt['price'] -
-                              self.c_price) * self.lot_debt['lot']
-                self.buy_short()
-                record = record.append(
-                    {'timestamp': row.timestamp, 'action': '做空出場', 'price': row.close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
-                self.short_just_out = True
-                continue
-
-            # (b) 做多：黑K且股價低於下斜SMA5
+            # (b) 出場：黑K且股價低於下斜SMA5
             if row.status == 'drop' and row.close < row.SMA5 and row.SMA5 < last_SMA5 and self.equity['lot'] != 0 and self.equity['price'] < row.close:
                 print(
                     f'{row.timestamp} sell long: buy at {self.equity["price"]}, sell at {row.close}')
                 self.c_price = row.close
+                lot_out = self.lot_per_out if self.equity['lot'] > self.lot_per_out else self.equity['lot']
+
                 point_diff = (self.c_price -
-                              self.equity["price"]) * self.equity["lot"]
+                              self.equity["price"]) * lot_out
                 self.sell_long()
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多出場', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.long_just_out = True
                 continue
 
-            # 3. 停損點
-
-            # (a) 做空：收盤價 > min
-            if (row.close > min_k or (row.close > row.SMA5 and row.SMA5 > last_SMA5)) and self.lot_debt['lot'] != 0:
-                print(row.timestamp, row.close, 'buy_short')
-                self.c_price = row.close
-                point_diff = (self.lot_debt["price"] -
-                              self.c_price) * self.lot_debt["lot"]
-                self.short_stop_loss()
-                record = record.append(
-                    {'timestamp': row.timestamp, 'action': '做空停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
-                self.short_just_out = True
-                continue
-
-            # (b) 做多：收盤價 < max
+            # (c) 停損：收盤價跌破Max或下斜SMA5
             if (row.close < max_k or (row.close < row.SMA5 and row.SMA5 < last_SMA5)) and self.equity['lot'] != 0:
                 print(row.timestamp, row.close, 'sell_long')
                 self.c_price = row.close
@@ -178,6 +144,43 @@ class Account:
                 record = record.append(
                     {'timestamp': row.timestamp, 'action': '做多停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
                 self.long_just_out = True
+                continue
+
+            # 2. 做空
+
+            # (a) 進場：股價小於min
+            if (row.status == 'drop' and row.close < min_k) and self.lot_debt['lot'] + self.lot_debt['lot'] == 0 and not self.short_just_out:
+                print(row.timestamp, row.close, 'sell_short')
+                record = record.append(
+                    {'timestamp': row.timestamp, 'action': '做空', 'price': row.close, 'detail': f'收盤 {row.close} < Min {min_k}'}, ignore_index=True)
+                self.c_price = row.close
+                self.sell_short()
+                continue
+
+            # (b) 出場：紅K且股價高於上斜SMA5
+            if row.status == 'rise' and row.close > row.SMA5 and row.SMA5 > last_SMA5 and self.lot_debt['lot'] != 0 and self.lot_debt['price'] > row.close:
+                print(
+                    f'{row.timestamp} buy short: sell at {self.lot_debt["price"]}, buy at {row.close}')
+                self.c_price = row.close
+                lot_out = self.lot_per_out if self.lot_debt['lot'] > self.lot_per_out else self.lot_debt['lot']
+                point_diff = (self.lot_debt['price'] -
+                              self.c_price) * lot_out
+                self.buy_short()
+                record = record.append(
+                    {'timestamp': row.timestamp, 'action': '做空出場', 'price': row.close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
+                self.short_just_out = True
+                continue
+
+            # (a) 停損：收盤價漲破Min或上斜SMA5
+            if (row.close > min_k or (row.close > row.SMA5 and row.SMA5 > last_SMA5)) and self.lot_debt['lot'] != 0:
+                print(row.timestamp, row.close, 'buy_short')
+                self.c_price = row.close
+                point_diff = (self.lot_debt["price"] -
+                              self.c_price) * self.lot_debt["lot"]
+                self.short_stop_loss()
+                record = record.append(
+                    {'timestamp': row.timestamp, 'action': '做空停損', 'price': row.close, 'detail': f'點數差 {point_diff} 淨點數 {self.net_point}'}, ignore_index=True)
+                self.short_just_out = True
                 continue
 
             result = result.append({'timestamp': row.timestamp, 'cash': self.cash, 'equity': self.equity['lot'], 'lot_debt': self.lot_debt['lot'], 'net asset': self.cash + 46000 * (
@@ -261,12 +264,20 @@ if uploaded_file is not None:
         st.subheader('每日操作檢視')
         plot_mode = st.radio("選擇圖表模式", ['單日', '多日'])
         if plot_mode == '單日':
+            selected_date = data.timestamp.iloc[0].date()
             selected_date = st.date_input(
-                '起始日期', data.timestamp.iloc[0].date())
+                '選擇日期', selected_date)
             start_date = dt.datetime.combine(
                 selected_date, dt.datetime.min.time())
             end_date = dt.datetime.combine(
                 selected_date, dt.datetime.max.time())
+            col1, col2 = st.columns([.1, 1])
+            if col1.button('Prev'):
+                start_date -= dt.timedelta(days=1)
+                end_date -= dt.timedelta(days=1)
+            if col2.button('Next'):
+                start_date += dt.timedelta(days=1)
+                end_date += dt.timedelta(days=1)
         else:
             start_date = dt.datetime.combine(st.date_input(
                 '起始日期', data.timestamp.iloc[0].date()), dt.datetime.min.time())
