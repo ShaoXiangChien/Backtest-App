@@ -71,9 +71,9 @@ class Account:
     @st.cache(suppress_st_warning=True)
     def run_sml(self):
         max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max(
-        )) if mode == '保守' else max(data.iloc[0].open, data.iloc[0].close)
+        )) if mode == '保守（前三根）' else max(data.iloc[0].open, data.iloc[0].close)
         min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min(
-        )) if mode == '保守' else min(data.open.iloc[0], data.close.iloc[0])
+        )) if mode == '保守（前三根）' else min(data.open.iloc[0], data.close.iloc[0])
         result = pd.DataFrame()
         record = pd.DataFrame()
         min_max_record = pd.DataFrame()
@@ -117,7 +117,7 @@ class Account:
 
             # 1. 做多
             # (a) 進場：股價大於max
-            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() > dt.time(11, 0) and self.early_stop == '十一點前')):
+            if (row.status == 'rise' and row.close > max_k) and self.equity['lot'] + self.lot_debt['lot'] == 0 and not self.long_just_out and (self.early_stop == '無' or (row.timestamp.time() <= dt.time(10, 30) and self.early_stop == '十點半前') or (row.timestamp.time() <= dt.time(11, 0) and self.early_stop == '十一點前')):
                 # print(row.timestamp, row.close, 'buy long')
                 self.c_price = row.close if not self.go_crazy else max_k + \
                     random.randint(1, 5)
