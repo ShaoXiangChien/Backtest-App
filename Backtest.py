@@ -71,15 +71,16 @@ class Account:
     @st.cache(suppress_st_warning=True)
     def run_sml(self):
         max_k = max(data.open.iloc[0:3].max(), data.close.iloc[0:3].max(
-        )) if mode == '保守（前三根）' else max(data.iloc[0].open, data.iloc[0].close)
+        )) if self.mode == '保守（前三根）' else max(data.iloc[0].open, data.iloc[0].close)
         min_k = min(data.open.iloc[0:3].min(), data.close.iloc[0:3].min(
-        )) if mode == '保守（前三根）' else min(data.open.iloc[0], data.close.iloc[0])
+        )) if self.mode == '保守（前三根）' else min(data.open.iloc[0], data.close.iloc[0])
         result = pd.DataFrame()
         record = pd.DataFrame()
         min_max_record = pd.DataFrame()
         min_max_record = min_max_record.append(
             {'timestamp': data.iloc[0].timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
         cur_date = data.timestamp.iloc[0].date()
+        day_start_id = 0
         st.write('模擬開始')
         # st.write(f'max_price: {max_k}, min_price: {min_k}')
         for idx, row in data.iterrows():
@@ -102,10 +103,14 @@ class Account:
                         {'timestamp': data.iloc[idx-1].timestamp, 'action': '平倉', 'price': data.iloc[idx-1].close, 'detail': f"點數差 {point_diff} 淨點數 {self.net_point}"}, ignore_index=True)
 
                 max_k = max(data.open.iloc[idx:idx+3].max(),
-                            data.close.iloc[idx:idx+3].max()) if mode == '保守' else max(data.open.iloc[idx], data.close.iloc[idx])
+                            data.close.iloc[idx:idx+3].max()) if self.mode == '保守' else max(data.open.iloc[idx], data.close.iloc[idx])
                 min_k = min(data.open.iloc[idx:idx+3].min(),
-                            data.close.iloc[idx:idx+3].min()) if mode == '保守' else min(data.open.iloc[idx], data.close.iloc[idx])
+                            data.close.iloc[idx:idx+3].min()) if self.mode == '保守' else min(data.open.iloc[idx], data.close.iloc[idx])
                 cur_date = row.timestamp.date()
+                day_start_id = idx
+
+            if idx - day_start_id < (3 if self.mode == '保守（前三根）' else 1):
+                continue
 
             min_max_record = min_max_record.append(
                 {'timestamp': row.timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
