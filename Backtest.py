@@ -81,6 +81,7 @@ class Account:
             {'timestamp': data.iloc[0].timestamp, 'min': min_k, 'max': max_k}, ignore_index=True)
         cur_date = data.timestamp.iloc[0].date()
         day_start_id = 0
+        not_in_day = None
         st.write('模擬開始')
         # st.write(f'max_price: {max_k}, min_price: {min_k}')
         for idx, row in data.iterrows():
@@ -108,6 +109,11 @@ class Account:
                             data.close.iloc[idx:idx+3].min()) if self.mode == '保守' else min(data.open.iloc[idx], data.close.iloc[idx])
                 cur_date = row.timestamp.date()
                 day_start_id = idx
+                not_in_day = cur_date if row.open - \
+                    data.close.iloc[idx-1] <= 50 else None
+
+            if cur_date == not_in_day:
+                continue
 
             if idx - day_start_id < (3 if self.mode == '保守（前三根）' else 1):
                 continue
